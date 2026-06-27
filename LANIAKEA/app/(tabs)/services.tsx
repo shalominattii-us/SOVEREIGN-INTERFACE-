@@ -1,27 +1,21 @@
-import { ScrollView, View, Text, RefreshControl, Pressable } from "react-native";
-import { useState } from "react";
+import { ScrollView, View, Text, RefreshControl, Pressable, ActivityIndicator } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
 import { ServiceCard } from "@/components/ui/service-card";
-import { mockServices } from "@/lib/mock-data";
+import { trpc } from "@/lib/trpc";
 
 export default function ServicesScreen() {
-  const [refreshing, setRefreshing] = useState(false);
+  const { data: services = [], isLoading, refetch, isRefetching } = trpc.laniakea.getServices.useQuery(undefined, {
+    refetchInterval: 30000,
+  });
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
-  };
-
-  const runningServices = mockServices.filter((s) => s.status === "running");
-  const degradedServices = mockServices.filter((s) => s.status === "degraded");
-  const stoppedServices = mockServices.filter((s) => s.status === "stopped");
+  const runningServices = services.filter((s) => s.status === "running");
+  const degradedServices = services.filter((s) => s.status === "degraded");
+  const stoppedServices = services.filter((s) => s.status === "stopped");
 
   return (
     <ScreenContainer className="p-0">
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />}
         contentContainerStyle={{ flexGrow: 1 }}
       >
         {/* Header */}
@@ -60,8 +54,16 @@ export default function ServicesScreen() {
           </View>
         )}
 
+        {/* Loading State */}
+        {isLoading && (
+          <View className="flex-1 items-center justify-center py-12">
+            <ActivityIndicator size="large" color="#0a7ea4" />
+            <Text className="text-muted mt-4">Loading services...</Text>
+          </View>
+        )}
+
         {/* Empty State */}
-        {mockServices.length === 0 && (
+        {!isLoading && services.length === 0 && (
           <View className="flex-1 items-center justify-center px-6 py-12">
             <Text className="text-lg font-semibold text-foreground mb-2">No Services</Text>
             <Text className="text-sm text-muted text-center">

@@ -2,35 +2,33 @@ import { ScrollView, View, Text, RefreshControl, Pressable, Alert } from "react-
 import { useState } from "react";
 import { ScreenContainer } from "@/components/screen-container";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { mockClusters, mockFailoverEvents } from "@/lib/mock-data";
+import { trpc } from "@/lib/trpc";
 
 export default function FailoverScreen() {
-  const [refreshing, setRefreshing] = useState(false);
   const [failoverInProgress, setFailoverInProgress] = useState(false);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
-  };
+  const { data: failoverStatus, refetch, isRefetching } = trpc.laniakea.getFailoverStatus.useQuery(undefined, { refetchInterval: 30000 });
+  const initiateFailover = trpc.laniakea.initiateFailover.useMutation();
 
-  const primaryCluster = mockClusters.find((c) => c.type === "primary" && c.status === "active");
-  const secondaryCluster = mockClusters.find((c) => c.type === "secondary");
+  const onRefresh = () => { refetch(); };
 
+  const primaryClusterName = failoverStatus?.primaryCluster ?? "Primary Cluster";
+  const secondaryClusterName = failoverStatus?.secondaryCluster ?? "Secondary Cluster";
   const handleFailover = () => {
     Alert.alert(
       "Initiate Failover",
-      `Failover from ${primaryCluster?.name} to ${secondaryCluster?.name}?`,
+      `Failover from ${primaryClusterName} to ${secondaryClusterName}?`,
       [
         { text: "Cancel", onPress: () => {}, style: "cancel" },
         {
           text: "Confirm",
-          onPress: () => {
+          onPress: async () => {
             setFailoverInProgress(true);
+            await initiateFailover.mutateAsync({ fromCluster: primaryClusterName, toCluster: secondaryClusterName });
             setTimeout(() => {
               setFailoverInProgress(false);
-              Alert.alert("Success", "Failover completed successfully");
+              refetch();
+              Alert.alert("Success", "Failover initiated successfully");
             }, 2000);
           },
         },
@@ -41,7 +39,7 @@ export default function FailoverScreen() {
   return (
     <ScreenContainer className="p-0">
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} />}
         contentContainerStyle={{ flexGrow: 1 }}
       >
         <View className="bg-primary px-6 pt-6 pb-8">
@@ -52,27 +50,22 @@ export default function FailoverScreen() {
         <View className="px-6 mt-6 mb-6">
           <Text className="text-lg font-bold text-foreground mb-4">Current Status</Text>
 
-          {primaryCluster && (
-            <View className="bg-surface rounded-2xl p-4 border border-border mb-4">
-              <View className="flex-row items-center justify-between mb-3">
-                <Text className="text-sm text-muted">Primary Cluster</Text>
-                <StatusBadge status={primaryCluster.status} size="sm" />
-              </View>
-              <Text className="text-lg font-bold text-foreground">{primaryCluster.name}</Text>
-              <Text className="text-xs text-muted mt-2">{primaryCluster.region}</Text>
+          <View className="bg-surface rounded-2xl p-4 border border-border mb-4">
+            <View className="flex-row items-center justify-between mb-3">
+              <Text className="text-sm text-muted">Primary Cluster</Text>
+              <StatusBadge status="active" size="sm" />
             </View>
-          )}
-
-          {secondaryCluster && (
-            <View className="bg-surface rounded-2xl p-4 border border-border">
-              <View className="flex-row items-center justify-between mb-3">
-                <Text className="text-sm text-muted">Secondary Cluster</Text>
-                <StatusBadge status={secondaryCluster.status} size="sm" />
-              </View>
-              <Text className="text-lg font-bold text-foreground">{secondaryCluster.name}</Text>
-              <Text className="text-xs text-muted mt-2">{secondaryCluster.region}</Text>
+            <Text className="text-lg font-bold text-foreground">{primaryClusterName}</Text>
+            <Text className="text-xs text-muted mt-2">Readiness: {failoverStatus?.primaryReadiness ?? 100}%</Text>
+          </View>
+          <View className="bg-surface rounded-2xl p-4 border border-border">
+            <View className="flex-row items-center justify-between mb-3">
+              <Text className="text-sm text-muted">Secondary Cluster</Text>
+              <StatusBadge status="standby" size="sm" />
             </View>
-          )}
+            <Text className="text-lg font-bold text-foreground">{secondaryClusterName}</Text>
+            <Text className="text-xs text-muted mt-2">Readiness: {failoverStatus?.secondaryReadiness ?? 98}%</Text>
+          </View>
         </View>
 
         <View className="px-6 mb-6">
@@ -105,8 +98,8 @@ export default function FailoverScreen() {
 
         <View className="px-6 pb-8">
           <Text className="text-lg font-bold text-foreground mb-3">Recent Failovers</Text>
-          {mockFailoverEvents.length > 0 ? (
-            mockFailoverEvents.map((event) => (
+          {(failoverStatus?.history ?? []).length > 0 ? (
+            (failoverStatus?.history ?? []).map((event) => (
               <View key={event.id} className="bg-surface rounded-lg p-4 border border-border mb-3">
                 <View className="flex-row items-center justify-between mb-2">
                   <Text className="text-sm font-semibold text-foreground">

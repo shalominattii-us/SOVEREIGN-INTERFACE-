@@ -1,24 +1,55 @@
-import { ScrollView, View, Text, Pressable, RefreshControl } from "react-native";
-import { useState } from "react";
+import { ScrollView, View, Text, Pressable, RefreshControl, ActivityIndicator } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
 import { MetricCard } from "@/components/ui/metric-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { AlertItem } from "@/components/ui/alert-item";
-import { generateDashboardSummary, mockServices } from "@/lib/mock-data";
+import { trpc } from "@/lib/trpc";
 import { useRouter } from "expo-router";
 
 export default function DashboardScreen() {
-  const [refreshing, setRefreshing] = useState(false);
-  const [summary, setSummary] = useState(generateDashboardSummary());
   const router = useRouter();
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setSummary(generateDashboardSummary());
-      setRefreshing(false);
-    }, 1000);
-  };
+  const {
+    data: summary,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isRefetching,
+  } = trpc.laniakea.getDashboardSummary.useQuery(undefined, {
+    refetchInterval: 30000,
+  });
+
+  const { data: services } = trpc.laniakea.getServices.useQuery(undefined, {
+    refetchInterval: 30000,
+  });
+
+  if (isLoading) {
+    return (
+      <ScreenContainer className="items-center justify-center">
+        <ActivityIndicator size="large" color="#0a7ea4" />
+        <Text className="text-muted mt-4">Loading Dashboard...</Text>
+      </ScreenContainer>
+    );
+  }
+
+  if (isError || !summary) {
+    return (
+      <ScreenContainer className="items-center justify-center px-6">
+        <Text className="text-error text-xl font-bold mb-2">Error Loading Dashboard</Text>
+        <Text className="text-muted text-center mb-6">
+          {error?.message ?? "Network request failed"}
+        </Text>
+        <Pressable onPress={() => refetch()}>
+          {({ pressed }) => (
+            <View className={`bg-primary rounded-xl px-8 py-3 ${pressed ? "opacity-80" : ""}`}>
+              <Text className="text-white font-semibold">Retry</Text>
+            </View>
+          )}
+        </Pressable>
+      </ScreenContainer>
+    );
+  }
 
   const healthColor =
     summary.overallHealth === "healthy"
@@ -30,7 +61,9 @@ export default function DashboardScreen() {
   return (
     <ScreenContainer className="p-0">
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />
+        }
         contentContainerStyle={{ flexGrow: 1 }}
       >
         {/* Header */}
@@ -92,7 +125,7 @@ export default function DashboardScreen() {
         <View className="px-6 mb-6">
           <Text className="text-lg font-bold text-foreground mb-3">Metaverse Services</Text>
           <View className="flex-row flex-wrap gap-3">
-            {mockServices.map((service) => (
+            {(services ?? []).map((service) => (
               <Pressable
                 key={service.id}
                 onPress={() => router.push("/services")}

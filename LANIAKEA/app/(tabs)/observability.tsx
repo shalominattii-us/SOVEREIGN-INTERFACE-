@@ -1,21 +1,17 @@
 import { ScrollView, View, Text, RefreshControl, Pressable } from "react-native";
 import { useState } from "react";
 import { ScreenContainer } from "@/components/screen-container";
-import { generateMockMetrics, generateMockLogs, generateMockTraces } from "@/lib/mock-data";
+import { trpc } from "@/lib/trpc";
 
 export default function ObservabilityScreen() {
-  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"metrics" | "logs" | "traces">("metrics");
-  const [metrics] = useState(generateMockMetrics());
-  const [logs] = useState(generateMockLogs());
-  const [traces] = useState(generateMockTraces());
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
-  };
+  const { data: metrics = [], refetch: refetchMetrics, isRefetching: isRefetchingMetrics } = trpc.laniakea.getMetrics.useQuery(undefined, { refetchInterval: 30000 });
+  const { data: logs = [], refetch: refetchLogs, isRefetching: isRefetchingLogs } = trpc.laniakea.getLogs.useQuery(undefined, { refetchInterval: 30000 });
+  const { data: traces = [], refetch: refetchTraces, isRefetching: isRefetchingTraces } = trpc.laniakea.getTraces.useQuery(undefined, { refetchInterval: 30000 });
+
+  const isRefetching = isRefetchingMetrics || isRefetchingLogs || isRefetchingTraces;
+  const onRefresh = () => { refetchMetrics(); refetchLogs(); refetchTraces(); };
 
   const latestMetric = metrics[metrics.length - 1];
   const errorLogs = logs.filter((l) => l.level === "error");
@@ -24,7 +20,7 @@ export default function ObservabilityScreen() {
   return (
     <ScreenContainer className="p-0">
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} />}
         contentContainerStyle={{ flexGrow: 1 }}
       >
         <View className="bg-primary px-6 pt-6 pb-8">
