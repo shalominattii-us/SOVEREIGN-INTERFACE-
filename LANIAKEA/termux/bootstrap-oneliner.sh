@@ -1,8 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ============================================================
-#  LANIAKEA — Intelligent Cross-Device Bootstrap v3.0
-#  Auto-detects OS, device type, network, and capabilities
-#  Works seamlessly on Termux, macOS, Linux, WSL, Windows
+#  LANIAKEA — Intelligent Cross-Device Bootstrap v3.1
+#  Fixed for ARM64/Termux with esbuild compatibility
 # ============================================================
 
 set -e
@@ -32,27 +31,6 @@ detect_platform() {
         fi
     elif [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "msys" ]]; then
         echo "windows"
-    else
-        echo "unknown"
-    fi
-}
-
-detect_device_type() {
-    if [ -f /sys/devices/virtual/dmi/id/sys_vendor ]; then
-        VENDOR=$(cat /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null || echo "")
-        if [[ "$VENDOR" =~ "VMware" ]] || [[ "$VENDOR" =~ "VirtualBox" ]]; then
-            echo "vm"
-        elif [[ "$VENDOR" =~ "QEMU" ]]; then
-            echo "qemu"
-        else
-            echo "physical"
-        fi
-    elif [[ "$(uname -s)" == "Darwin" ]]; then
-        if sysctl -n hw.model 2>/dev/null | grep -q "MacBook\|Mac"; then
-            echo "laptop"
-        else
-            echo "desktop"
-        fi
     else
         echo "unknown"
     fi
@@ -116,43 +94,6 @@ detect_available_port() {
     echo $BASE_PORT
 }
 
-detect_system_resources() {
-    local PLATFORM=$1
-    
-    if [[ "$PLATFORM" == "termux" ]]; then
-        FREE_MEM=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-        CORES=$(nproc 2>/dev/null || echo "1")
-    else
-        if [[ "$PLATFORM" == "macos" ]]; then
-            FREE_MEM=$(vm_stat | grep "Pages free" | awk '{print $3}' | tr -d '.' | awk '{printf "%.0f\n", $1 * 4096 / 1024}')
-            CORES=$(sysctl -n hw.ncpu)
-        else
-            FREE_MEM=$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0")
-            CORES=$(nproc 2>/dev/null || echo "1")
-        fi
-    fi
-    
-    echo "${FREE_MEM}:${CORES}"
-}
-
-optimize_pnpm_config() {
-    local RESOURCES=$1
-    local MEMORY=$(echo $RESOURCES | cut -d: -f1)
-    local CORES=$(echo $RESOURCES | cut -d: -f2)
-    
-    # Set NODE_ENV and memory flags for pnpm/esbuild
-    if (( MEMORY < 1000000 )); then
-        # Low memory: limit heap
-        echo "--max-workers=1"
-    elif (( MEMORY < 2000000 )); then
-        # Medium memory: moderate workers
-        echo "--max-workers=2"
-    else
-        # High memory: use optimal workers
-        echo "--max-workers=$CORES"
-    fi
-}
-
 # ============================================================
 # INSTALLATION & SETUP
 # ============================================================
@@ -162,7 +103,7 @@ install_dependencies() {
     
     case "$PLATFORM" in
         termux)
-            pkg update -y && pkg install -y nodejs git curl build-essential
+            pkg update -y && pkg install -y nodejs git curl build-essential python
             ;;
         macos)
             if ! command -v brew &> /dev/null; then
@@ -172,7 +113,7 @@ install_dependencies() {
             ;;
         linux|wsl)
             sudo apt-get update 2>/dev/null || apt-get update
-            sudo apt-get install -y nodejs npm git curl build-essential 2>/dev/null || apt-get install -y nodejs npm git curl build-essential
+            sudo apt-get install -y nodejs npm git curl build-essential python3 2>/dev/null || apt-get install -y nodejs npm git curl build-essential python3
             ;;
     esac
     
@@ -185,29 +126,57 @@ install_dependencies() {
 
 # Detect environment
 PLATFORM=$(detect_platform)
-DEVICE_TYPE=$(detect_device_type)
 LOCAL_IP=$(detect_network_interface "$PLATFORM")
 PORT=$(detect_available_port 3000 "$PLATFORM")
-RESOURCES=$(detect_system_resources "$PLATFORM")
-BUILD_CONFIG=$(optimize_pnpm_config "$RESOURCES")
+
+echo "╔════════════════════════════════════════════════════════╗"
+echo "║   LANIAKEA — INTELLIGENT CROSS-DEVICE BOOTSTRAP v3.1  ║"
+echo "╚════════════════════════════════════════════════════════╝"
+echo ""
+echo "Platform: $PLATFORM"
+echo "IP: $LOCAL_IP"
+echo "Port: $PORT"
+echo ""
 
 # Install dependencies
 pkg update -y 2>/dev/null || true
-pkg install -y nodejs git curl 2>/dev/null || true
+pkg install -y nodejs git curl build-essential python 2>/dev/null || true
 npm install -g pnpm 2>/dev/null || true
 
 # Clone or update repository
 ([ -d "$HOME/sovereign-interface" ] && cd "$HOME/sovereign-interface" && git pull || git clone https://github.com/shalominattii-us/SOVEREIGN-INTERFACE-.git "$HOME/sovereign-interface")
 
-# Build project (without passing build flags to esbuild)
 cd "$HOME/sovereign-interface/LANIAKEA"
-pnpm install --ignore-scripts
+
+# Fix for Termux ARM64: Clear esbuild cache and rebuild from source
+if [ "$PLATFORM" = "termux" ]; then
+    echo ""
+    echo "━━ Fixing esbuild for ARM64 Termux..."
+    rm -rf node_modules/.pnpm/@esbuild* 2>/dev/null || true
+    rm -rf node_modules/esbuild 2>/dev/null || true
+fi
+
+# Install with build from source for ARM64
+echo ""
+echo "━━ Installing dependencies (building from source)..."
+pnpm install --ignore-scripts --no-frozen-lockfile
+
+# Force rebuild of esbuild
+echo ""
+echo "━━ Building esbuild..."
+if [ "$PLATFORM" = "termux" ]; then
+    npm rebuild esbuild --build-from-source 2>&1 | tail -20 || true
+fi
+
+# Build project
+echo ""
+echo "━━ Building LANIAKEA..."
 pnpm build
 
 # Setup environment
+mkdir -p "$HOME/.laniakea"
 cat > .env << EOF
 PLATFORM=$PLATFORM
-DEVICE_TYPE=$DEVICE_TYPE
 EXPO_PUBLIC_API_BASE_URL=http://${LOCAL_IP}:${PORT}
 NODE_ENV=production
 PORT=${PORT}
@@ -216,17 +185,14 @@ EOF
 # Print diagnostics
 echo ""
 echo "╔════════════════════════════════════════════════════════╗"
-echo "║   LANIAKEA — INTELLIGENT CROSS-DEVICE BOOTSTRAP v3.0  ║"
+echo "║            LANIAKEA — BUILD SUCCESSFUL ✓              ║"
 echo "╚════════════════════════════════════════════════════════╝"
 echo ""
 echo "System Information:"
 echo "  Platform       : $PLATFORM"
-echo "  Device Type    : $DEVICE_TYPE"
-echo "  Memory         : $(( $(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0) / 1024 )) MB"
 echo "  API URL        : http://${LOCAL_IP}:${PORT}"
 echo ""
-echo "Environment Variable:"
-echo "  EXPO_PUBLIC_API_BASE_URL=http://${LOCAL_IP}:${PORT}"
+echo "Starting server on port $PORT..."
 echo ""
 
 # Start server
