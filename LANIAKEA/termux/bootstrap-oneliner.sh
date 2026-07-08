@@ -135,16 +135,20 @@ detect_system_resources() {
     echo "${FREE_MEM}:${CORES}"
 }
 
-optimize_build_config() {
+optimize_pnpm_config() {
     local RESOURCES=$1
     local MEMORY=$(echo $RESOURCES | cut -d: -f1)
     local CORES=$(echo $RESOURCES | cut -d: -f2)
     
+    # Set NODE_ENV and memory flags for pnpm/esbuild
     if (( MEMORY < 1000000 )); then
+        # Low memory: limit heap
         echo "--max-workers=1"
     elif (( MEMORY < 2000000 )); then
+        # Medium memory: moderate workers
         echo "--max-workers=2"
     else
+        # High memory: use optimal workers
         echo "--max-workers=$CORES"
     fi
 }
@@ -185,7 +189,7 @@ DEVICE_TYPE=$(detect_device_type)
 LOCAL_IP=$(detect_network_interface "$PLATFORM")
 PORT=$(detect_available_port 3000 "$PLATFORM")
 RESOURCES=$(detect_system_resources "$PLATFORM")
-BUILD_FLAGS=$(optimize_build_config "$RESOURCES")
+BUILD_CONFIG=$(optimize_pnpm_config "$RESOURCES")
 
 # Install dependencies
 pkg update -y 2>/dev/null || true
@@ -195,10 +199,10 @@ npm install -g pnpm 2>/dev/null || true
 # Clone or update repository
 ([ -d "$HOME/sovereign-interface" ] && cd "$HOME/sovereign-interface" && git pull || git clone https://github.com/shalominattii-us/SOVEREIGN-INTERFACE-.git "$HOME/sovereign-interface")
 
-# Build project
+# Build project (without passing build flags to esbuild)
 cd "$HOME/sovereign-interface/LANIAKEA"
 pnpm install --ignore-scripts
-pnpm build $BUILD_FLAGS
+pnpm build
 
 # Setup environment
 cat > .env << EOF
@@ -218,6 +222,7 @@ echo ""
 echo "System Information:"
 echo "  Platform       : $PLATFORM"
 echo "  Device Type    : $DEVICE_TYPE"
+echo "  Memory         : $(( $(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0) / 1024 )) MB"
 echo "  API URL        : http://${LOCAL_IP}:${PORT}"
 echo ""
 echo "Environment Variable:"
